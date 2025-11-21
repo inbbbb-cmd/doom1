@@ -5,190 +5,228 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>DOOM Telegram</title>
     
-    <!-- Скрипт Telegram -->
+    <!-- Скрипт Telegram WebApp -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     
     <!-- Стили JS-DOS (v6.22) -->
     <link rel="stylesheet" href="https://js-dos.com/6.22/current/js-dos.css">
     
     <style>
-        /* Сброс стилей для полноэкранного режима */
-        html, body, #dos-container {
+        /* Основные стили */
+        html, body {
             width: 100%;
             height: 100%;
             margin: 0;
             padding: 0;
-            background-color: #000;
+            background-color: #1a1a1a;
             overflow: hidden;
+            font-family: monospace;
+            user-select: none; /* Запрет выделения текста */
         }
 
-        /* Экран "Нажми старт" (нужен чтобы включился звук в браузере) */
-        #start-screen {
+        #dos-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Экран запуска / Загрузки */
+        #overlay {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
-            background: url('https://js-dos.com/cdn/DOOM.png') no-repeat center center;
+            background: #000 url('https://js-dos.com/cdn/DOOM.png') no-repeat center center;
             background-size: cover;
-            z-index: 10;
+            z-index: 100;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            cursor: pointer;
+        }
+        
+        /* Затемнение фона картинки */
+        #overlay::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: -1;
         }
 
+        /* Кнопка старт */
         #start-btn {
-            padding: 15px 30px;
+            padding: 15px 40px;
             font-size: 24px;
             font-weight: bold;
             color: white;
-            background: #d92b2b;
-            border: none;
-            border-radius: 5px;
+            background: #b91c1c;
+            border: 2px solid #fff;
+            border-radius: 0;
             text-transform: uppercase;
-            box-shadow: 0 0 20px rgba(0,0,0,0.8);
             cursor: pointer;
+            box-shadow: 0 0 15px rgba(185, 28, 28, 0.8);
+            transition: transform 0.1s;
         }
-        
-        /* Индикатор загрузки */
-        #loading-status {
+        #start-btn:active { transform: scale(0.95); }
+
+        /* Статус загрузки */
+        #status-box {
             display: none;
             margin-top: 20px;
-            font-family: 'Courier New', Courier, monospace;
-            color: #d92b2b;
-            font-weight: bold;
-            font-size: 16px;
-            background: rgba(0, 0, 0, 0.8);
+            color: #fca5a5;
+            font-size: 14px;
+            background: rgba(0,0,0,0.9);
             padding: 15px;
-            border-radius: 5px;
-            max-width: 80%;
+            border: 1px solid #b91c1c;
+            max-width: 300px;
             text-align: center;
-            line-height: 1.4;
+            white-space: pre-wrap;
         }
 
-        /* Предупреждение о повороте (только для телефонов в портретном режиме) */
+        /* Предупреждение о повороте экрана */
         #rotate-msg {
             display: none;
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
             background: #000;
             color: #fff;
-            z-index: 999;
+            z-index: 9999;
             align-items: center;
             justify-content: center;
             text-align: center;
             flex-direction: column;
         }
         
-        .rotate-icon { font-size: 40px; margin-bottom: 10px; }
-
+        /* Мобильные стили */
         @media screen and (orientation: portrait) and (max-width: 768px) {
             #rotate-msg { display: flex; }
-            #start-screen { display: none; } /* Скрываем игру пока не перевернут */
+            #overlay { display: none; }
         }
     </style>
 </head>
 <body>
 
-    <!-- Сообщение о повороте -->
+    <!-- Блок требования поворота экрана -->
     <div id="rotate-msg">
-        <div class="rotate-icon">🔄</div>
-        <div>Поверните устройство</div>
+        <div style="font-size: 50px; margin-bottom: 20px;">🔄</div>
+        <div>Пожалуйста, поверните<br>устройство горизонтально</div>
     </div>
 
-    <!-- Кнопка запуска -->
-    <div id="start-screen" onclick="runDoom()">
-        <button id="start-btn">PLAY DOOM</button>
-        <div id="loading-status">ЗАГРУЗКА ДАННЫХ...</div>
+    <!-- Оверлей загрузки -->
+    <div id="overlay">
+        <button id="start-btn" onclick="initGame()">ИГРАТЬ</button>
+        <div id="status-box">Готов к запуску...</div>
     </div>
 
-    <!-- Контейнер игры -->
+    <!-- Контейнер DOSBox -->
     <div id="dos-container"></div>
 
-    <!-- Библиотека JS-DOS (v6.22 - поддерживает мобильные контроллеры) -->
+    <!-- JS-DOS -->
     <script src="https://js-dos.com/6.22/current/js-dos.js"></script>
 
     <script>
-        // 1. Инициализация Telegram
         const tg = window.Telegram.WebApp;
         tg.ready();
-        tg.expand(); // Разворачиваем на весь экран
+        tg.expand();
 
-        // Флаг, чтобы не запускать дважды при двойном клике
-        let isRunning = false;
+        // Настройка цветов темы Telegram
+        document.body.style.backgroundColor = tg.themeParams.bg_color || '#000';
 
-        // Ссылки на игру (Зеркала)
-        // Лучший вариант: положить doom.zip рядом с index.html и использовать './doom.zip'
-        const gameUrls = [
-            "https://cdn.dos.zone/original/2X/2/24b00b14f118580763440ecaddcc948f8cb94f14.zip", // Dos.Zone CDN (стабильнее)
-            "https://js-dos.com/cdn/upload/doom.zip", // Оригинальный источник (часто падает из-за CORS)
-            "./doom.zip" // Локальный файл (самый надежный, если вы его скачали)
+        // Список источников игры (Зеркала)
+        // 1. Локальный файл (приоритет)
+        // 2. Надежный CDN Dos.Zone
+        // 3. Резервный CDN
+        const gameSources = [
+            './doom.zip', 
+            'https://cdn.dos.zone/original/2X/2/24b00b14f118580763440ecaddcc948f8cb94f14.zip',
+            'https://js-dos.com/cdn/upload/doom.zip'
         ];
 
-        // 2. Функция запуска игры
-        function runDoom() {
-            if (isRunning) return;
-            isRunning = true;
+        let dosInstance = null;
+        let isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
-            const startBtn = document.getElementById('start-btn');
-            const loadingStatus = document.getElementById('loading-status');
-            const startScreen = document.getElementById('start-screen');
+        function log(msg, isError = false) {
+            const box = document.getElementById('status-box');
+            box.style.display = 'block';
+            box.innerHTML = msg;
+            box.style.color = isError ? '#ff5555' : '#fca5a5';
+            console.log(isError ? '[ERROR] ' + msg : '[INFO] ' + msg);
+        }
 
-            // Показываем статус загрузки, кнопку скрываем
-            startBtn.style.display = 'none';
-            loadingStatus.style.display = 'block';
-            loadingStatus.innerText = "ЗАГРУЗКА ЭМУЛЯТОРА...";
+        function initGame() {
+            document.getElementById('start-btn').style.display = 'none';
+            log("Инициализация эмулятора...");
 
-            // Настройка эмулятора
-            const dosInterface = Dos(document.getElementById("dos-container"), {
+            // Конфигурация JS-DOS
+            dosInstance = Dos(document.getElementById("dos-container"), {
                 wdosboxUrl: "https://js-dos.com/6.22/current/wdosbox.js",
                 cycles: 1000,
-                autolock: false,
+                autolock: true, // Важно для ПК: захват мыши/клавиатуры при клике
             });
 
-            dosInterface.ready(function (fs, main) {
-                // Пытаемся скачать игру
-                tryDownloadAndRun(fs, main, 0);
+            dosInstance.ready((fs, main) => {
+                downloadAndRun(fs, main, 0);
             });
-            
-            // Функция рекурсивной попытки загрузки с разных зеркал
-            function tryDownloadAndRun(fs, main, urlIndex) {
-                if (urlIndex >= gameUrls.length) {
-                    showError("Не удалось скачать игру ни с одного сервера.<br>Ошибка CORS или сети.<br><br><b>Решение:</b> Скачайте doom.zip и положите его в одну папку с index.html");
-                    return;
-                }
+        }
 
-                const url = gameUrls[urlIndex];
-                loadingStatus.innerHTML = `СКАЧИВАНИЕ DOOM.ZIP...<br><small>Источник ${urlIndex + 1}/${gameUrls.length}</small>`;
-                console.log("Попытка загрузки с:", url);
-
-                fs.extract(url)
-                .then(function () {
-                    loadingStatus.innerText = "ЗАПУСК...";
-                    main(["-c", "doom.exe"]).then(function (ci) {
-                        console.log("Doom started");
-                        startScreen.style.display = 'none';
-                    });
-                })
-                .catch(function(err) {
-                    console.warn("Ошибка источника " + url, err);
-                    // Пробуем следующий URL
-                    tryDownloadAndRun(fs, main, urlIndex + 1);
-                });
+        // Функция умной загрузки: пробует источники по очереди
+        async function downloadAndRun(fs, main, index) {
+            if (index >= gameSources.length) {
+                log("ОШИБКА ЗАГРУЗКИ!\n\nНе удалось скачать doom.zip ни с одного сервера.\n\nЕсли вы запускаете файл локально, браузер блокирует доступ. Используйте локальный сервер или загрузите на хостинг.", true);
+                // Возвращаем кнопку
+                const btn = document.createElement('button');
+                btn.innerText = "Попробовать снова";
+                btn.onclick = () => location.reload();
+                btn.style.marginTop = "10px";
+                document.getElementById('status-box').appendChild(btn);
+                return;
             }
 
-            function showError(msg) {
-                console.error("Все загрузки не удались");
-                loadingStatus.innerHTML = `<span style='color:#ff5555'>ОШИБКА!</span><br>${msg}`;
-                // Возвращаем кнопку сброса (перезагрузка страницы для простоты)
-                const retryBtn = document.createElement('button');
-                retryBtn.innerText = "Попробовать снова";
-                retryBtn.style.marginTop = "10px";
-                retryBtn.style.padding = "5px 10px";
-                retryBtn.onclick = () => location.reload();
-                loadingStatus.appendChild(document.createElement('br'));
-                loadingStatus.appendChild(retryBtn);
+            const url = gameSources[index];
+            log(`Загрузка игры...\nИсточник ${index + 1}/${gameSources.length}`);
+
+            try {
+                // Используем fetch, чтобы точно знать, есть ли доступ к файлу
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const buffer = await response.arrayBuffer();
+                const data = new Uint8Array(buffer);
+
+                // Сохраняем файл в виртуальную FS эмулятора
+                fs.createFile("doom.zip", data);
+
+                log("Распаковка архива...");
+                
+                // Распаковываем
+                await fs.extract("doom.zip");
+                
+                log("Запуск DOOM...");
+                
+                // Скрываем оверлей
+                document.getElementById('overlay').style.display = 'none';
+
+                // Запускаем exe
+                main(["-c", "doom.exe"]).then(() => {
+                    console.log("Игра запущена!");
+                    // Хак для мобильных: иногда кнопки не появляются сразу, форсируем ресайз
+                    if (isMobile) {
+                        setTimeout(() => window.dispatchEvent(new Event('resize')), 1000);
+                    }
+                });
+
+            } catch (e) {
+                console.warn(`Ошибка источника ${url}:`, e);
+                downloadAndRun(fs, main, index + 1);
             }
         }
+
+        // Обработка поворота экрана
+        window.addEventListener('resize', () => {
+            tg.expand();
+        });
     </script>
 </body>
 </html>
